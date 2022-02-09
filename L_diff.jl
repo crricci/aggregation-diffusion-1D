@@ -1,38 +1,16 @@
 
-function solve_l(;Vₐ=0.1, β=1.0, γ = 1.0, δ = 1.0, L=3.0,
-        h=0.1,ϕ=1.0,ψ=1.0,ν = 0.0, V_GRD = 0.0, initialBumps = 1, T_fin = 10.0)
-        
-    Δx = 1e-2
-    Nx = Int(L/Δx)
-    x = LinRange(0,L,Nx)
 
-
-    T_span = (0.0,T_fin)
-    l₀ = initialCondition(x,L,Δx,initialBumps) 
-    p = (Vₐ,β,γ,δ,L,h,ϕ,ψ,ν,V_GRD,x,Nx,Δx)
-    prob = ODEProblem(df!,l₀,T_span,p)
-    sol = solve(prob,Rosenbrock23())
-
-    return sol,p
-end
-
-function df!(dl,l,p,t)
-    (Vₐ,β,γ,δ,L,h,ϕ,ψ,ν,V_GRD,x,Nx,Δx) = p
-    p1 = 0.2
-    p2 = L-0.2   
-
-    w = conv_w(l,p)  
+function df!(du,u,p,t)
+    w = conv_w(u,p)
     ∇w = ∇(w,p)
-    ∇l = ∇(l,p)
-    Δl = Δ(l.^δ,p)
-    ∇V = ∇([V(xi,p1,p2) for xi in x],p)
-    dl .= -Vₐ * ∇(l.^γ.*∇w,p) + ν*Δl + ∇(l .* ∇V,p) + V_GRD * abs.(∇l).^2 
+    ∇u = ∇(u,p)
+    Δu = Δ(u.^(p.δ),p)
+    du .= - p.γa * ∇(u.^p.γ.*∇w,p) + p.γd * Δu + ∇(u.*p.∇V,p) + p.V_GRD * abs.(∇u).^2 
 end
 
 function ∇(f,p)
-    """gradient dirchlet boundary
-    """
-    (Vₐ,β,γ,δ,L,h,ϕ,ψ,ν,V_GRD,x,Nx,Δx) = p
+    """ gradient dirchlet boundary 0.0 """
+    @unpack_parameters p
     ∇f = similar(f)
     for i=2:Nx-1
         ∇f[i] = (f[i+1] - f[i-1])/(2*Δx)
@@ -43,9 +21,8 @@ function ∇(f,p)
 end
 
 function Δ(f,p)
-    """laplacian dirichlet boundary 
-    """
-    (Vₐ,β,γ,δ,L,h,ϕ,ψ,ν,V_GRD,x,Nx,Δx) = p
+    """ laplacian dirichlet boundary 0.0 """
+    @unpack_parameters p
     Δf = similar(f)
     for i=2:Nx-1
         Δf[i] = (f[i+1] - 2*f[i] + f[i-1])/Δx^2
@@ -55,30 +32,29 @@ function Δ(f,p)
     return Δf
 end
 
-
-function conv_w(l,p)
-    """ lϕ = l^ϕ 
-        Whlϕ = (Wh*l^ϕ) 
-        Whlϕψ = (Wh*l^ϕ)^ψ
-        w = (Wh*l^ϕ)^ψ l^(β-1) 
+function conv_w(f,p)
+    """ fϕ = f^ϕ 
+        Whfϕ = (Wh*f^ϕ) 
+        Whfϕψ = (Wh*f^ϕ)^ψ
+        w = (Wh*f^ϕ)^ψ f^(β-1) 
     """ 
-    (Vₐ,β,γ,δ,L,h,ϕ,ψ,ν,V_GRD,x,Nx,Δx) = p
+    @unpack_parameters p
     Nih = ceil(Int,h/Δx)
 
-    lϕ = abs.(l).^ϕ
-    Whlϕ = zeros(eltype(l),size(l))
+    fϕ = abs.(f).^ϕ
+    Whfϕ = zeros(eltype(f),size(f))
     for i in 1:Nx
-        j_range = mod.(i-Nih-2:i+Nih+1,Nx).+1 
+        j_range = unique( max.(1, min.(Nx, i-Nih-1:i+Nih+1)) )
         for k in 1:length(j_range)  # TRAPEZ
         jZₙₓ = j_range[k]
         jZₙₓ_next = k < length(j_range) ? j_range[k+1] : j_range[1]
-        Whlϕ[i] += Δx*(W(d(x[i],x[jZₙₓ],L),h)*lϕ[jZₙₓ] + 
-                W(d(x[i],x[jZₙₓ_next],L),h)*lϕ[jZₙₓ_next])/2
+        Whfϕ[i] += Δx*(W(abs(x[i]-x[jZₙₓ]),h)*fϕ[jZₙₓ] + 
+                W(abs(x[i]-x[jZₙₓ_next]),h)*fϕ[jZₙₓ_next])/2
         end
     end
 
-    Whlϕψ = abs.(Whlϕ).^ψ 
-    w = Whlϕψ .* abs.(l).^(β-1)
+    Whfϕψ = abs.(Whfϕ).^ψ 
+    w = Whfϕψ .* abs.(f).^(β-1)
 
     return w
 end
